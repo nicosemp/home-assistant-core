@@ -816,6 +816,7 @@ FLOWS = {
         "yamaha_musiccast",
         "yardian",
         "yeelight",
+        "ynab",
         "yolink",
         "youless",
         "youtube",

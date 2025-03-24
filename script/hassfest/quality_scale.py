@@ -2209,6 +2209,8 @@ def validate_iqs_file(config: Config, integration: Integration) -> None:
         if (
             integration.domain not in INTEGRATIONS_WITHOUT_QUALITY_SCALE_FILE
             and integration.domain not in NO_QUALITY_SCALE
+            # FIXME: Remove this check once the quality scale file is implemented
+            and integration.domain != "ynab"
             and integration.integration_type != "virtual"
         ):
             integration.add_error(
