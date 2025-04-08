@@ -1,33 +1,16 @@
 """Platform for retrieving YNAB data."""
 
-from datetime import timedelta
 import logging
 
-import voluptuous as vol
-
-from homeassistant.components.sensor import (
-    PLATFORM_SCHEMA as SENSOR_PLATFORM_SCHEMA,
-    SensorEntity,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import DOMAIN
 from .coordinator import YnabDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
-
-# Time between updating data from the YNAB API
-SCAN_INTERVAL = timedelta(minutes=60)
-
-PLATFORM_SCHEMA = SENSOR_PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_ACCESS_TOKEN): cv.string,
-    }
-)
 
 
 async def async_setup_entry(
@@ -36,71 +19,72 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up YNAB sensors from a config entry."""
-    # title = entry.data.get("title")  # The user ID is stored in the config entry title
-    # user_id = entry.data.get("user_id")  # Retrieve the user_id from the config entry
-    # async_add_entities([YnabUserIdSensor(user_id)], True)
-
     access_token = entry.data[CONF_ACCESS_TOKEN]
+    budgets = entry.data["budgets"]
+
     coordinator = YnabDataUpdateCoordinator(hass, access_token)
     await coordinator.async_config_entry_first_refresh()
 
-    async_add_entities([YnabUserIdSensor(coordinator)], True)
+    account_entities = []
+
+    for budget in budgets:
+        budget_id = budget["id"]
+        budget_currency = budget["currency"]
+        for account in budget["accounts"]:
+            account_id = account["id"]
+            account_name = account["name"]
+            account_balance = account["balance"]
+            account_entities.append(
+                YnabAccountSensor(
+                    coordinator,
+                    budget_id,
+                    budget_currency,
+                    account_id,
+                    account_name,
+                    account_balance,
+                )
+            )
+
+    async_add_entities(account_entities, True)
 
 
-class YnabUserIdSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a YNAB User ID sensor."""
+class YnabAccountSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a YNAB account sensor."""
 
-    def __init__(self, coordinator: YnabDataUpdateCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: YnabDataUpdateCoordinator,
+        budget_id: str,
+        budget_currency: str,
+        account_id: str,
+        account_name: str,
+        account_balance: int,
+    ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._attr_name = "YNAB User ID"
-        self._attr_unique_id = f"ynab_user_id_{coordinator.user_id}"
-        self._attr_icon = "mdi:account"
-        # self._state = user_id
+        super().__init__(coordinator)  # Link the sensor to the coordinator
+
+        self._attr_name = f"{account_name} Balance"
+        self._attr_unique_id = f"{budget_id}-{account_id}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, budget_id)},
+            "name": f"Budget {budget_id}",
+            "manufacturer": "YNAB",
+            "model": "Budget",
+        }
+        self._attr_native_unit_of_measurement = budget_currency
+        self._attr_icon = "mdi:currency-eur"
+
+        self._state = account_balance / 1000  # Convert milliunits to units
+        self._budget_id = budget_id
+        self._account_id = account_id
 
     @property
-    def state(self) -> str:
+    def state(self) -> float:
         """Return the state of the sensor."""
-        return self.coordinator.data
-
-
-# async def async_setup_platform(
-#     hass: HomeAssistant,
-#     config: ConfigType,
-#     async_add_entities: AddEntitiesCallback,
-#     discovery_info: DiscoveryInfoType | None = None,
-# ) -> bool:
-#     """Set up the YNAB from configuration.yaml."""
-#     configuration = ynab.Configuration(access_token=config[CONF_ACCESS_TOKEN])
-#     api_client = ynab.ApiClient(configuration)
-#     user_api = ynab.UserApi(api_client)
-#     sensor = YnabSensor(user_api)
-#     async_add_entities([sensor], True)
-
-
-# class YnabSensor(Entity):
-#     """Representation of a YNAB sensor."""
-
-#     def __init__(self, user_api: ynab.UserApi) -> None:
-#         """Initialize the sensor."""
-#         self._user_api = user_api
-#         self._state = None
-#         self._attr_name = "YNAB"
-#         self._attr_icon = ICON
-
-#     async def async_update(self):
-#         """Get the latest data from the YNAB API."""
-#         loop = asyncio.get_event_loop()
-#         try:
-#             get_user_response = await loop.run_in_executor(
-#                 None, self._user_api.get_user
-#             )
-#             self._state = get_user_response.data.user.id
-#         except ynab.ApiException as err:
-#             _LOGGER.error("Error connecting to YNAB API: %s", err)
-#             self._state = None
-
-#     @property
-#     def state(self) -> str:
-#         """Return the state of the sensor."""
-#         return self._state
+        # Find the latest account balance from the coordinator's data
+        for budget in self.coordinator.data:
+            if budget.id == self._budget_id:
+                for account in budget.accounts:
+                    if account.id == self._account_id:
+                        return account.balance / 1000  # Convert milliunits to units
+        return None  # Return None if the account is not found

@@ -2,15 +2,16 @@
 
 import asyncio
 from datetime import timedelta
+import functools
 
-from ynab import ApiClient, ApiException, Configuration, UserApi
+from ynab import ApiClient, ApiException, BudgetsApi, Configuration
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, LOGGER
 
-SCAN_INTERVAL = timedelta(minutes=60)
+SCAN_INTERVAL = timedelta(seconds=30)
 
 
 class YnabDataUpdateCoordinator(DataUpdateCoordinator):
@@ -19,7 +20,8 @@ class YnabDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, access_token: str) -> None:
         """Initialize the coordinator."""
         self._access_token = access_token
-        self._user_id = None
+        self._configuration = Configuration(access_token=self._access_token)
+        self._budgets = None
         super().__init__(
             hass,
             LOGGER,
@@ -29,18 +31,49 @@ class YnabDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> str:
         """Fetch data from the YNAB API."""
-        configuration = Configuration(access_token=self._access_token)
         try:
-            with ApiClient(configuration) as api_client:
-                user_api = UserApi(api_client)
+            with ApiClient(self._configuration) as api_client:
+                budgets_api = BudgetsApi(api_client)
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, user_api.get_user)
-                self._user_id = response.data.user.id
-                return self._user_id
+                response = await loop.run_in_executor(
+                    None,
+                    functools.partial(budgets_api.get_budgets, include_accounts=True),
+                )
+                self._budgets = response.data.budgets
+                return self._budgets
         except ApiException as err:
             raise UpdateFailed(f"Error fetching data from YNAB API: {err}") from err
 
-    @property
-    def user_id(self) -> str:
-        """Return the user ID."""
-        return self._user_id
+
+# async def fetch_budgets(hass: HomeAssistant, access_token: str) -> list[dict[str, str]]:
+#     """Fetch the list of budgets from the YNAB API."""
+#     configuration = Configuration(access_token=access_token)
+
+#     try:
+#         with ApiClient(configuration) as api_client:
+#             budgets_api = BudgetsApi(api_client)
+#             loop = asyncio.get_event_loop()
+#             response = await loop.run_in_executor(
+#                 None, functools.partial(budgets_api.get_budgets, include_accounts=True)
+#             )
+#             budgets = response.data.budgets
+#             return [
+#                 {
+#                     "id": budget.id,
+#                     "name": budget.name,
+#                     "currency": budget.currency_format.iso_code,
+#                     "accounts": [
+#                         {
+#                             "id": account.id,
+#                             "name": account.name,
+#                             "balance": account.balance,
+#                         }
+#                         for account in budget.accounts
+#                         if account.deleted is False and account.closed is False
+#                     ],
+#                 }
+#                 for budget in budgets
+#             ]
+#     except ApiException as err:
+#         LOGGER.error("Error fetching budgets from YNAB API: %s", err)
+#         raise ConfigEntryAuthFailed("Failed to fetch budgets") from err
