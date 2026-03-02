@@ -1,0 +1,35 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This YNAB account is already configured"
+    },
+    "error": {
+      "cannot_fetch_budgets": "Could not fetch budgets from YNAB",
+      "invalid_auth": "Invalid access token",
+      "unknown": "An unexpected error occurred"
+    },
+    "step": {
+      "budgets": {
+        "data": {
+          "budgets": "Budgets"
+        },
+        "description": "Choose which budgets to track.",
+        "title": "Select budgets"
+      },
+      "user": {
+        "data": {
+          "access_token": "Personal access token"
+        },
+        "description": "Enter your YNAB personal access token.",
+        "title": "Connect to YNAB"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "account_balance": {
+        "name": "Account balance"
+      }
+    }
+  }
+}

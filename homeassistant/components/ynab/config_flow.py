@@ -2,121 +2,120 @@
 
 from __future__ import annotations
 
-import asyncio
-import functools
-from typing import Any
+from typing import Any, TypedDict
 
 import voluptuous as vol
 from ynab import ApiClient, ApiException, BudgetsApi, Configuration, UserApi
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ACCESS_TOKEN
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, LOGGER
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, str]) -> dict[str, str]:
-    """Validate the user input by connecting to the YNAB API."""
-    configuration = Configuration(access_token=data[CONF_ACCESS_TOKEN])
+class AccountDict(TypedDict):
+    """The processed Account data."""
 
-    # Use the YNAB API client to validate the token
-    try:
-        with ApiClient(configuration) as api_client:
-            user_api = UserApi(api_client)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, user_api.get_user)
-            user_id = response.data.user.id
-    except ApiException as err:
-        LOGGER.error("Error validating YNAB access token: %s", err)
-        raise ConfigEntryAuthFailed("Invalid access token") from err
-
-    return {"title": "YNAB", "user_id": user_id}
+    id: str
+    name: str
+    balance: int
 
 
-# TODO: Should this fetch be done in the coordinator?
-async def fetch_budgets(hass: HomeAssistant, access_token: str) -> list[dict[str, str]]:
-    """Fetch the list of budgets from the YNAB API."""
+class BudgetDict(TypedDict):
+    """The processed Budget data."""
+
+    id: str
+    name: str
+    currency: str
+    accounts: list[AccountDict]
+
+
+def _validate_token(access_token: str) -> str:
+    """Validate the access token and return the user ID (blocking)."""
+
+    configuration = Configuration(access_token=access_token)
+    with ApiClient(configuration) as api_client:
+        user_api = UserApi(api_client)
+        response = user_api.get_user()
+        LOGGER.info(response.data)
+        return response.data.user.id
+
+
+def _fetch_budgets(access_token: str) -> list[BudgetDict]:
+    """Fetch the list of budgets from the YNAB API (blocking)."""
+
     configuration = Configuration(access_token=access_token)
 
-    try:
-        with ApiClient(configuration) as api_client:
-            budgets_api = BudgetsApi(api_client)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, functools.partial(budgets_api.get_budgets, include_accounts=True)
-            )
-            budgets = response.data.budgets
-            return [
-                {
-                    "id": budget.id,
-                    "name": budget.name,
-                    "currency": budget.currency_format.iso_code,
-                    "accounts": [
-                        {
-                            "id": account.id,
-                            "name": account.name,
-                            "balance": account.balance,
-                            "deleted": account.deleted,
-                            "closed": account.closed,
-                        }
-                        for account in budget.accounts
-                        if account.deleted is False and account.closed is False
-                    ],
-                }
-                for budget in budgets
-            ]
-    except ApiException as err:
-        LOGGER.error("Error fetching budgets from YNAB API: %s", err)
-        raise ConfigEntryAuthFailed("Failed to fetch budgets") from err
+    with ApiClient(configuration) as api_client:
+        budgets_api = BudgetsApi(api_client)
+        response = budgets_api.get_budgets(include_accounts=True)
+
+        if not response.data or not response.data.budgets:
+            return []
+
+        return [
+            {
+                "id": budget.id,
+                "name": budget.name,
+                "currency": budget.currency_format.iso_code
+                if budget.currency_format
+                else "USD",
+                "accounts": [
+                    {
+                        "id": account.id,
+                        "name": account.name,
+                        "balance": account.balance,
+                    }
+                    for account in (budget.accounts or [])
+                    if not account.deleted and not account.closed
+                ],
+            }
+            for budget in response.data.budgets
+        ]
 
 
 class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for YNAB."""
+    """Handle the config flow for YNAB."""
 
     VERSION = 1
+    MINOR_VERSION = 1
 
     def __init__(self) -> None:
         """Initialize the config flow."""
         self.access_token: str | None = None
         self.user_id: str | None = None
-        self.budgets: list[dict[str, str]] = []
+        self.budgets: list[BudgetDict] = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step."""
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             try:
-                info = await validate_input(self.hass, user_input)
-                self.access_token = user_input[CONF_ACCESS_TOKEN]
-                self.user_id = info["user_id"]
-            except ConfigEntryAuthFailed:
+                user_id = await self.hass.async_add_executor_job(
+                    _validate_token, user_input[CONF_ACCESS_TOKEN]
+                )
+            except ApiException:
                 errors["base"] = "invalid_auth"
-            except Exception:  # noqa: BLE001
-                LOGGER.exception("Unexpected exception during YNAB config flow")
-                errors["base"] = "unknown"
             else:
-                # Check if an entry with the same access token already exists
-                await self.async_set_unique_id(user_input[CONF_ACCESS_TOKEN])
+                self.access_token = user_input[CONF_ACCESS_TOKEN]
+                self.user_id = user_id
+
+                await self.async_set_unique_id(user_id)
                 self._abort_if_unique_id_configured()
 
-                # Proceed to the budgets step
                 return await self.async_step_budgets()
-
-        data_schema = vol.Schema(
-            {
-                vol.Required(CONF_ACCESS_TOKEN): str,
-            }
-        )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=data_schema,
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ACCESS_TOKEN): str,
+                }
+            ),
             errors=errors,
         )
 
@@ -124,15 +123,14 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the step to select budgets."""
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Store the selected budgets and create the config entry
             selected_budget_ids = user_input["budgets"]
-            LOGGER.info(self.budgets[0]["accounts"][0])
             selected_budgets = [
                 {
                     "id": budget["id"],
+                    "name": budget["name"],
                     "currency": budget["currency"],
                     "accounts": budget["accounts"],
                 }
@@ -141,7 +139,7 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
             ]
 
             return self.async_create_entry(
-                title=f"YNAB ({self.user_id})",
+                title=f"YNAB ({self.user_id})",  # FIXME: This should be `YNAB - [FIRST_NAME]` ideally, instead of using the id: https://github.com/ynab/ynab-sdk-python/issues/18
                 data={
                     CONF_ACCESS_TOKEN: self.access_token,
                     "user_id": self.user_id,
@@ -149,26 +147,25 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
                 },
             )
 
-        # Fetch budgets if not already fetched
         if not self.budgets:
-            try:
-                self.budgets = await fetch_budgets(self.hass, self.access_token)
-            except ConfigEntryAuthFailed:
-                errors["base"] = "cannot_fetch_budgets"
-            except Exception:  # noqa: BLE001
-                LOGGER.exception("Unexpected exception during budget fetching")
-                errors["base"] = "unknown"
+            if self.access_token is None:
+                return await self.async_step_user()
 
-        # Prepare the schema for budget selection
+            try:
+                self.budgets = await self.hass.async_add_executor_job(
+                    _fetch_budgets, self.access_token
+                )
+            except ApiException:
+                errors["base"] = "cannot_fetch_budgets"
+
         budget_options = {budget["id"]: budget["name"] for budget in self.budgets}
-        data_schema = vol.Schema(
-            {
-                vol.Required("budgets"): cv.multi_select(budget_options),
-            }
-        )
 
         return self.async_show_form(
             step_id="budgets",
-            data_schema=data_schema,
+            data_schema=vol.Schema(
+                {
+                    vol.Required("budgets"): cv.multi_select(budget_options),
+                }
+            ),
             errors=errors,
         )
