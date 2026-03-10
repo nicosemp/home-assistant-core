@@ -222,6 +222,10 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
 class YnabOptionsFlowHandler(OptionsFlowWithReload):
     """Handle the options flow for YNAB."""
 
+    def __init__(self) -> None:
+        """Initialize the options flow."""
+        self._plans: list[PlanDict] = []
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -244,7 +248,7 @@ class YnabOptionsFlowHandler(OptionsFlowWithReload):
         configured_plan_ids = [plan["id"] for plan in configured_plans]
 
         try:
-            self._plans: list[PlanDict] = await self.hass.async_add_executor_job(
+            self._plans = await self.hass.async_add_executor_job(
                 _fetch_plans, access_token
             )
         except ApiException:

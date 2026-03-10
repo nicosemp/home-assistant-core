@@ -67,9 +67,20 @@ class YnabAccountSensor(CoordinatorEntity[YnabDataUpdateCoordinator], SensorEnti
         self._account_id = account_id
 
     @property
+    def available(self) -> bool:
+        """Return True if the account exists in the latest API data."""
+        if not super().available:
+            return False
+        for plan in self.coordinator.data or []:
+            if plan.id == self._plan_id:
+                for account in plan.accounts or []:
+                    if account.id == self._account_id:
+                        return True
+        return False
+
+    @property
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
-
         if not self.coordinator.data:
             return None
 
