@@ -30,16 +30,16 @@ class YnabDataUpdateCoordinator(DataUpdateCoordinator[list[BudgetSummary]]):
             config_entry=config_entry,
         )
 
-    def _fetch_budgets(self) -> list:
-        """Fetch budgets from the YNAB API (blocking)."""
+    def _fetch_plans(self) -> list:
+        """Fetch plans from the YNAB API (blocking)."""
         with ApiClient(self._configuration) as api_client:
-            budgets_api = BudgetsApi(api_client)
-            response = budgets_api.get_budgets(include_accounts=True)
+            plans_api = BudgetsApi(api_client)
+            response = plans_api.get_budgets(include_accounts=True)
             return response.data.budgets
 
     async def _async_update_data(self) -> list:
         """Fetch data from the YNAB API."""
         try:
-            return await self.hass.async_add_executor_job(self._fetch_budgets)
+            return await self.hass.async_add_executor_job(self._fetch_plans)
         except ApiException as err:
             raise UpdateFailed(f"Error fetching data from YNAB API: {err}") from err

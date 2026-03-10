@@ -18,19 +18,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up YNAB sensors from a config entry."""
     coordinator = entry.runtime_data
-    budgets = entry.data["budgets"]
+    plans = entry.data["plans"]
 
     async_add_entities(
         YnabAccountSensor(
             coordinator,
-            budget["id"],
-            budget["currency"],
-            budget["name"],
+            plan["id"],
+            plan["currency"],
+            plan["name"],
             account["id"],
             account["name"],
         )
-        for budget in budgets
-        for account in budget["accounts"]
+        for plan in plans
+        for account in plan["accounts"]
     )
 
 
@@ -43,27 +43,27 @@ class YnabAccountSensor(CoordinatorEntity[YnabDataUpdateCoordinator], SensorEnti
     def __init__(
         self,
         coordinator: YnabDataUpdateCoordinator,
-        budget_id: str,
-        budget_currency: str,
-        budget_name: str,
+        plan_id: str,
+        plan_currency: str,
+        plan_name: str,
         account_id: str,
         account_name: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
 
-        self._attr_unique_id = f"{budget_id}-{account_id}"
+        self._attr_unique_id = f"{plan_id}-{account_id}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, budget_id)},
-            name=budget_name,
+            identifiers={(DOMAIN, plan_id)},
+            name=plan_name,
             manufacturer="YNAB",
-            model="Budget",
+            model="Plan",
             entry_type=DeviceEntryType.SERVICE,
         )
-        self._attr_native_unit_of_measurement = budget_currency
+        self._attr_native_unit_of_measurement = plan_currency
         self._attr_name = account_name
 
-        self._budget_id = budget_id
+        self._plan_id = plan_id
         self._account_id = account_id
 
     @property
@@ -73,9 +73,9 @@ class YnabAccountSensor(CoordinatorEntity[YnabDataUpdateCoordinator], SensorEnti
         if not self.coordinator.data:
             return None
 
-        for budget in self.coordinator.data:
-            if budget.id == self._budget_id:
-                for account in budget.accounts or []:
+        for plan in self.coordinator.data:
+            if plan.id == self._plan_id:
+                for account in plan.accounts or []:
                     if account.id == self._account_id:
                         return account.balance / 1000
         return None

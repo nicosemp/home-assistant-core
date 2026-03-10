@@ -22,8 +22,8 @@ class AccountDict(TypedDict):
     balance: int
 
 
-class BudgetDict(TypedDict):
-    """The processed Budget data."""
+class PlanDict(TypedDict):
+    """The processed Plan data."""
 
     id: str
     name: str
@@ -42,24 +42,24 @@ def _validate_token(access_token: str) -> str:
         return response.data.user.id
 
 
-def _fetch_budgets(access_token: str) -> list[BudgetDict]:
-    """Fetch the list of budgets from the YNAB API (blocking)."""
+def _fetch_plans(access_token: str) -> list[PlanDict]:
+    """Fetch the list of plans from the YNAB API (blocking)."""
 
     configuration = Configuration(access_token=access_token)
 
     with ApiClient(configuration) as api_client:
-        budgets_api = BudgetsApi(api_client)
-        response = budgets_api.get_budgets(include_accounts=True)
+        plans_api = BudgetsApi(api_client)
+        response = plans_api.get_budgets(include_accounts=True)
 
         if not response.data or not response.data.budgets:
             return []
 
         return [
             {
-                "id": budget.id,
-                "name": budget.name,
-                "currency": budget.currency_format.iso_code
-                if budget.currency_format
+                "id": plan.id,
+                "name": plan.name,
+                "currency": plan.currency_format.iso_code
+                if plan.currency_format
                 else "USD",
                 "accounts": [
                     {
@@ -67,11 +67,11 @@ def _fetch_budgets(access_token: str) -> list[BudgetDict]:
                         "name": account.name,
                         "balance": account.balance,
                     }
-                    for account in (budget.accounts or [])
+                    for account in (plan.accounts or [])
                     if not account.deleted and not account.closed
                 ],
             }
-            for budget in response.data.budgets
+            for plan in response.data.budgets
         ]
 
 
@@ -85,7 +85,7 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.access_token: str | None = None
         self.user_id: str | None = None
-        self.budgets: list[BudgetDict] = []
+        self.plans: list[PlanDict] = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -107,7 +107,7 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(user_id)
                 self._abort_if_unique_id_configured()
 
-                return await self.async_step_budgets()
+                return await self.async_step_plans()
 
         return self.async_show_form(
             step_id="user",
@@ -119,23 +119,23 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_budgets(
+    async def async_step_plans(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the step to select budgets."""
+        """Handle the step to select plans."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            selected_budget_ids = user_input["budgets"]
-            selected_budgets = [
+            selected_plan_ids = user_input["plans"]
+            selected_plans = [
                 {
-                    "id": budget["id"],
-                    "name": budget["name"],
-                    "currency": budget["currency"],
-                    "accounts": budget["accounts"],
+                    "id": plan["id"],
+                    "name": plan["name"],
+                    "currency": plan["currency"],
+                    "accounts": plan["accounts"],
                 }
-                for budget in self.budgets
-                if budget["id"] in selected_budget_ids
+                for plan in self.plans
+                if plan["id"] in selected_plan_ids
             ]
 
             return self.async_create_entry(
@@ -143,28 +143,28 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
                 data={
                     CONF_ACCESS_TOKEN: self.access_token,
                     "user_id": self.user_id,
-                    "budgets": selected_budgets,
+                    "plans": selected_plans,
                 },
             )
 
-        if not self.budgets:
+        if not self.plans:
             if self.access_token is None:
                 return await self.async_step_user()
 
             try:
-                self.budgets = await self.hass.async_add_executor_job(
-                    _fetch_budgets, self.access_token
+                self.plans = await self.hass.async_add_executor_job(
+                    _fetch_plans, self.access_token
                 )
             except ApiException:
-                errors["base"] = "cannot_fetch_budgets"
+                errors["base"] = "cannot_fetch_plans"
 
-        budget_options = {budget["id"]: budget["name"] for budget in self.budgets}
+        plan_options = {plan["id"]: plan["name"] for plan in self.plans}
 
         return self.async_show_form(
-            step_id="budgets",
+            step_id="plans",
             data_schema=vol.Schema(
                 {
-                    vol.Required("budgets"): cv.multi_select(budget_options),
+                    vol.Required("plans"): cv.multi_select(plan_options),
                 }
             ),
             errors=errors,

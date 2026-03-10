@@ -4,17 +4,17 @@
       "already_configured": "This YNAB account is already configured"
     },
     "error": {
-      "cannot_fetch_budgets": "Could not fetch budgets from YNAB",
+      "cannot_fetch_plans": "Could not fetch plans from YNAB",
       "invalid_auth": "Invalid access token",
       "unknown": "An unexpected error occurred"
     },
     "step": {
-      "budgets": {
+      "plans": {
         "data": {
-          "budgets": "Budgets"
+          "plans": "Plans"
         },
-        "description": "Choose which budgets to track.",
-        "title": "Select budgets"
+        "description": "Choose which plans to track.",
+        "title": "Select plans"
       },
       "user": {
         "data": {
