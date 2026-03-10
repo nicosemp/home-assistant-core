@@ -7,8 +7,14 @@ from typing import Any, TypedDict
 import voluptuous as vol
 from ynab import ApiClient, ApiException, BudgetsApi, Configuration, UserApi
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_ACCESS_TOKEN
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, LOGGER
@@ -143,6 +149,8 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
                 data={
                     CONF_ACCESS_TOKEN: self.access_token,
                     "user_id": self.user_id,
+                },
+                options={
                     "plans": selected_plans,
                 },
             )
@@ -165,6 +173,100 @@ class YnabConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required("plans"): cv.multi_select(plan_options),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of the access token."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                user_id = await self.hass.async_add_executor_job(
+                    _validate_token, user_input[CONF_ACCESS_TOKEN]
+                )
+            except ApiException:
+                errors["base"] = "invalid_auth"
+            else:
+                await self.async_set_unique_id(user_id)
+                self._abort_if_unique_id_mismatch()
+
+                return self.async_update_reload_and_abort(
+                    self._get_reconfigure_entry(),
+                    data_updates={CONF_ACCESS_TOKEN: user_input[CONF_ACCESS_TOKEN]},
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ACCESS_TOKEN): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> YnabOptionsFlowHandler:
+        """Get the options flow for this handler."""
+        return YnabOptionsFlowHandler()
+
+
+class YnabOptionsFlowHandler(OptionsFlowWithReload):
+    """Handle the options flow for YNAB."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the options flow to select plans."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            selected_plan_ids = user_input["plans"]
+            selected_plans = [
+                plan for plan in self._plans if plan["id"] in selected_plan_ids
+            ]
+
+            return self.async_create_entry(
+                title="",
+                data={"plans": selected_plans},
+            )
+
+        access_token = self.config_entry.data[CONF_ACCESS_TOKEN]
+        configured_plans: list[PlanDict] = self.config_entry.options.get("plans", [])
+        configured_plan_ids = [plan["id"] for plan in configured_plans]
+
+        try:
+            self._plans: list[PlanDict] = await self.hass.async_add_executor_job(
+                _fetch_plans, access_token
+            )
+        except ApiException:
+            errors["base"] = "cannot_fetch_plans"
+            self._plans = configured_plans
+
+        plan_options = {plan["id"]: plan["name"] for plan in self._plans}
+
+        # Ensure previously-selected plans still appear even if removed from YNAB
+        for plan in configured_plans:
+            if plan["id"] not in plan_options:
+                plan_options[plan["id"]] = plan["name"]
+                self._plans.append(plan)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "plans",
+                        default=configured_plan_ids,
+                    ): cv.multi_select(plan_options),
                 }
             ),
             errors=errors,

@@ -18,7 +18,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up YNAB sensors from a config entry."""
     coordinator = entry.runtime_data
-    plans = entry.data["plans"]
+    plans = entry.options["plans"]
 
     async_add_entities(
         YnabAccountSensor(

@@ -1,7 +1,9 @@
 {
   "config": {
     "abort": {
-      "already_configured": "This YNAB account is already configured"
+      "already_configured": "This YNAB account is already configured",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]",
+      "unique_id_mismatch": "This token belongs to a different YNAB account"
     },
     "error": {
       "cannot_fetch_plans": "Could not fetch plans from YNAB",
@@ -16,6 +18,13 @@
         "description": "Choose which plans to track.",
         "title": "Select plans"
       },
+      "reconfigure": {
+        "data": {
+          "access_token": "Personal access token"
+        },
+        "description": "Update your YNAB personal access token.",
+        "title": "Reconfigure YNAB"
+      },
       "user": {
         "data": {
           "access_token": "Personal access token"
@@ -29,6 +38,20 @@
     "sensor": {
       "account_balance": {
         "name": "Account balance"
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_fetch_plans": "Could not fetch plans from YNAB"
+    },
+    "step": {
+      "init": {
+        "data": {
+          "plans": "Plans"
+        },
+        "description": "Choose which plans to track.",
+        "title": "Select plans"
       }
     }
   }
